@@ -15,7 +15,7 @@ Updated 2026-10-25. Scores come only from the test/sim evidence listed.
 | Colorblind palette + floor numbers | ✅ | ❌ | Web only |
 | Pause on tab hidden | ✅ | n/a | Web visibilitychange handler |
 | Sounds / haptics feel | ✅ (WebAudio synth + vibrate) | Partial (vibrate calls only, no audio) | Unverified on a real device |
-| APK build | ❌ | ❌ | No Android export templates in the build VM — next step is CI or a templates-equipped machine |
+| APK build | n/a | ✅ (CI) | GitHub Actions (public repo SeanShaffer88/SpliceStack) run #5 SUCCESS 2026-10-25: harness step passed in CI, export-debug APK produced + verified after download — 24,145,351 B, SHA-256 b626cc3d…, contains classes.dex, AndroidManifest.xml, lib/arm64-v8a/libgodot_android.so, debug signature (META-INF/ANDROIDD.RSA). Debug-signed sideload build (Godot default SDK levels: min 24 / target 34). On-device install/runtime still **Unverified** — SEAN's phone is the verdict. CI fixes that got it green: editor settings need a Java SDK path; SDK overrides must stay empty without Gradle build; platform 34 + build-tools 34 installed via sdkmanager; project must enable `textures/vram_compression/import_etc2_astc` (Godot reports that one as a blank configuration error) |
 
 ## P1 Feel Pass (2026-10-25, SEAN-directed) — tuning resolved from bot evidence
 - **Streak scoring capped:** PERFECT = 10 + 25×min(streak, 6) in both builds (was 10 + 50×streak unbounded). Evidence: flawless 30-floor score fell from 23,550 → **4,425** (Godot harness) and web perfect runs now score in the low thousands instead of 33k. Scores are now comparable between good and great runs.
