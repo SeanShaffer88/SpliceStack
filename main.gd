@@ -45,6 +45,7 @@ func _ready() -> void:
 	rng.randomize()
 	best = _load_best(mode)
 	_reset()
+	msg_label.text = "SPLICE STACK — %s\nTap to start" % mode.to_upper()
 	_update_labels()
 
 func _reset() -> void:
@@ -69,9 +70,9 @@ func _new_block() -> void:
 	var from_left := r.randf() < 0.5
 	cur_jitter = 0.94 + r.randf() * 0.12 if mode == "daily" else 1.0
 	if from_left:
-		cur = {"x": -float(top["w"]) + 14.0, "w": float(top["w"]), "dir": 1.0}
+		cur = {"x": 0.0, "w": float(top["w"]), "dir": 1.0}
 	else:
-		cur = {"x": VIEW_W - 14.0, "w": float(top["w"]), "dir": -1.0}
+		cur = {"x": VIEW_W - float(top["w"]), "w": float(top["w"]), "dir": -1.0}
 
 func _speed() -> float:
 	return minf(890.0, 308.0 + float(_floor()) * 14.0) * cur_jitter
@@ -222,13 +223,13 @@ func _update_falling(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_update_falling(delta)
-	if state == "play":
+	if state != "dead":
 		cur["x"] = float(cur["x"]) + float(cur["dir"]) * _speed() * delta
-		if float(cur["x"]) < -float(cur["w"]) + 14.0:
-			cur["x"] = -float(cur["w"]) + 14.0
+		if float(cur["x"]) < 0.0:
+			cur["x"] = 0.0
 			cur["dir"] = 1.0
-		if float(cur["x"]) > VIEW_W - 14.0:
-			cur["x"] = VIEW_W - 14.0
+		if float(cur["x"]) > VIEW_W - float(cur["w"]):
+			cur["x"] = VIEW_W - float(cur["w"])
 			cur["dir"] = -1.0
 	var target := maxf(0.0, float(stack.size() - 9) * BLOCK_H)
 	cam_y = lerpf(cam_y, target, minf(1.0, delta * 4.0))
