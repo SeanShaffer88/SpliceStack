@@ -1,0 +1,22 @@
+; Engine configuration file.
+; Splice Stack — P0 greybox prototype (Godot 4.3)
+
+config_version=5
+
+[application]
+
+config/name="Splice Stack"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+window/handheld/orientation=0
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"

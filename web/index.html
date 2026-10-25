@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Splice Stack — MVP</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { background:#0b0b10; color:#eee; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; display:flex; flex-direction:column; align-items:center; min-height:100vh; padding:12px 8px 24px; }
+  h1 { font-size:17px; font-weight:700; letter-spacing:.4px; margin:4px 0 2px; }
+  p.sub { font-size:12.5px; color:#9a9ab0; margin-bottom:10px; text-align:center; max-width:430px; }
+  .tabs { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; justify-content:center; }
+  .tabs button { background:#1b1b28; color:#ccc; border:1px solid #33334a; border-radius:999px; padding:8px 14px; font-size:13.5px; cursor:pointer; }
+  .tabs button.active { background:#c8102e; border-color:#c8102e; color:#fff; font-weight:700; }
+  #frame { background:#000; border:1px solid #2c2c40; border-radius:18px; overflow:hidden; box-shadow:0 12px 40px rgba(0,0,0,.6); position:relative; }
+  canvas { display:block; touch-action:none; }
+  #bar { display:flex; gap:6px; margin-top:10px; }
+  #bar button { background:#1b1b28; color:#eee; border:1px solid #33334a; border-radius:10px; padding:9px 16px; font-size:14px; cursor:pointer; }
+  #bar button:disabled { opacity:.35; cursor:default; }
+  #shareBtn { background:#c8102e; border-color:#c8102e; font-weight:700; }
+  #hint { margin-top:10px; font-size:13px; color:#c9c9da; text-align:center; max-width:430px; line-height:1.45; }
+  #settings { display:none; margin-top:12px; background:#14141f; border:1px solid #2c2c40; border-radius:14px; padding:16px; width:min(430px,94vw); }
+  #settings.open { display:block; }
+  #settings h2 { font-size:15px; margin-bottom:10px; }
+  #settings label { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid #23233a; font-size:14px; }
+  #settings input[type=checkbox] { width:20px; height:20px; accent-color:#c8102e; }
+  #settings button { margin-top:12px; background:#26263c; color:#eee; border:1px solid #3a3a58; border-radius:8px; padding:8px 12px; cursor:pointer; font-size:13px; }
+  #resetBtn { color:#ff8a8a !important; }
+</style>
+</head>
+<body>
+<h1>SPLICE STACK</h1>
+<p class="sub">Full MVP — Endless + Daily Tower. Falling slices can knock your own tower loose now. Careful.</p>
+<div class="tabs">
+  <button id="tab-endless" class="active" onclick="setMode('endless')">🧱 Endless</button>
+  <button id="tab-daily" onclick="setMode('daily')">📅 Daily Tower</button>
+  <button id="tab-settings" onclick="toggleSettings()">⚙️ Settings</button>
+</div>
+<div id="frame"><canvas id="cv" width="420" height="740"></canvas></div>
+<div id="bar">
+  <button id="shareBtn" onclick="shareCard()" disabled>📤 Share Card</button>
+  <button onclick="game && game.restart()">↻ Restart</button>
+</div>
+<div id="hint"><b>Tap</b> to drop the sliding block. Overhang is sliced off — and a falling slice that lands on an exposed ledge of your tower <b>knocks that block loose</b>. PERFECT drops (dead-on) build streaks; every 5th perfect widens you back up. Land within a hair for a CLOSE bonus.</div>
+<div id="settings">
+  <h2>Settings</h2>
+  <label>Sound <input type="checkbox" id="set-sound"></label>
+  <label>Haptics (vibration) <input type="checkbox" id="set-haptics"></label>
+  <label>Colorblind-friendly palette <input type="checkbox" id="set-colorblind"></label>
+  <label>Reduced flash &amp; shake <input type="checkbox" id="set-reducedflash"></label>
+  <button onclick="toggleSettings()">Close</button>
+  <button id="resetBtn" onclick="resetData()">Erase all saved scores &amp; settings</button>
+</div>
+
+<script>
+"use strict";
+const W = 420, H = 740, BH = 30, START_W = 220, BASE_Y = 668;
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+
+/* ---------- settings & storage ---------- */
+const DEFSET = { sound:true, haptics:true, colorblind:false, reducedflash:false };
+let SET = Object.assign({}, DEFSET, JSON.parse(localStorage.getItem('splice_settings') || '{}'));
+function saveSettings(){ localStorage.setItem('splice_settings', JSON.stringify(SET)); }
+function bindSettings(){
+  const map = { 'set-sound':'sound', 'set-haptics':'haptics', 'set-colorblind':'colorblind', 'set-reducedflash':'reducedflash' };
+  for (const id in map){
+    const el = document.getElementById(id);
+    el.checked = SET[map[id]];
+    el.onchange = () => { SET[map[id]] = el.checked; saveSettings(); };
+  }
+}
+function toggleSettings(){ document.getElementById('settings').classList.toggle('open'); }
+function resetData(){
+  for (const k of Object.keys(localStorage)) if (k.startsWith('splice_') || k.startsWith('trio_')) localStorage.removeItem(k);
+  SET = Object.assign({}, DEFSET); bindSettings(); location.reload();
+}
+function getBest(mode){ return +(localStorage.getItem('splice_best_'+mode) || 0); }
+function setBest(mode, v){ if (v > getBest(mode)) localStorage.setItem('splice_best_'+mode, v); }
+function todayStr(d){ d = d || new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function dailyHistory(){ return JSON.parse(localStorage.getItem('splice_daily_history') || '{}'); }
+function recordDaily(floor){
+  const hst = dailyHistory(), t = todayStr();
+  if (!(t in hst) || floor > hst[t]) hst[t] = floor;
+  localStorage.setItem('splice_daily_history', JSON.stringify(hst));
+}
+function dailyStreak(){
+  const hst = dailyHistory(); let streak = 0; const d = new Date();
+  if (!(todayStr(d) in hst)) d.setDate(d.getDate()-1); // streak survives until end of today
+  while (todayStr(d) in hst){ streak++; d.setDate(d.getDate()-1); }
+  return streak;
+}
+/* seeded rng (mulberry32) — Daily pattern is identical for everyone on a date */
+function hashStr(s){ let h = 2166136261; for (let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function mulberry32(seed){ return function(){ seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+/* ---------- audio / haptics ---------- */
+let AC = null;
+function beep(freq, dur, type, vol){
+  if (!SET.sound) return;
+  try{
+    if (!AC) AC = new (window.AudioContext||window.webkitAudioContext)();
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = type||'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol||0.12, AC.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime+dur);
+    o.connect(g); g.connect(AC.destination); o.start(); o.stop(AC.currentTime+dur);
+  }catch(e){}
+}
+function vib(ms){ if (SET.haptics && navigator.vibrate) navigator.vibrate(ms); }
+const NOTE = [523.25, 587.33, 659.25, 783.99, 880.00, 1046.50, 1174.66, 1318.51];
+const PAL_NORMAL = i => 'hsl('+((i*24)%360)+',65%,55%)';
+const PAL_CB = i => ['#0072B2','#E69F00','#009E73','#CC79A7','#56B4E9','#F0E442','#D55E00','#999999'][i % 8];
+function blockColor(i){ return SET.colorblind ? PAL_CB(i) : PAL_NORMAL(i); }
+
+/* ---------- game ---------- */
+let mode = 'endless';
+class SpliceMVP {
+  constructor(m){ this.mode = m; this.reset(); this.state='ready'; }
+  reset(){
+    this.stack = [{x:(W-START_W)/2, w:START_W}];
+    this.score = 0; this.streak = 0; this.closes = 0; this.knocked = 0; this.chipped = 0;
+    this.falling = []; this.popups = []; this.camY = 0; this.flash = 0; this.shake = 0;
+    this.spawnIdx = 0;
+    this.rng = this.mode==='daily' ? mulberry32(hashStr('splice-daily-'+todayStr())) : Math.random;
+    this.newBlock();
+  }
+  floor(){ return this.stack.length - 1; }
+  newBlock(){
+    const top = this.stack[this.stack.length-1];
+    const fromLeft = this.rng() < 0.5;
+    const jitter = this.mode==='daily' ? 0.94 + this.rng()*0.12 : 1; // daily: seeded speed variance
+    this.curSpeedJitter = jitter;
+    this.cur = { x: fromLeft ? -top.w+8 : W-8, w: top.w, dir: fromLeft ? 1 : -1 };
+    this.spawnIdx++;
+  }
+  speed(){ return Math.min(520, (180 + this.floor()*8)) * (this.curSpeedJitter||1); }
+  restart(){ this.reset(); this.state='play'; document.getElementById('shareBtn').disabled = true; }
+  onTap(){
+    if (this.state==='ready'){ this.state='play'; document.getElementById('shareBtn').disabled = true; return; }
+    if (this.state==='paused'){ this.state='play'; return; }
+    if (this.state==='dead'){ this.restart(); return; }
+    this.drop();
+  }
+  drop(){
+    const below = this.stack[this.stack.length-1], c = this.cur;
+    const left = Math.max(c.x, below.x), right = Math.min(c.x+c.w, below.x+below.w);
+    const overlap = right - left;
+    const level = this.stack.length; // level index the new block will occupy
+    if (overlap <= 0){
+      // whole block falls as debris
+      this.falling.push({x:c.x, w:c.w, originLevel:level, fallPx:0, vy:200, debris:true});
+      this.gameOver(); return;
+    }
+    if (c.x < left) this.falling.push({x:c.x, w:left-c.x, originLevel:level, fallPx:0, vy:60, debris:false});
+    if (c.x+c.w > right) this.falling.push({x:right, w:c.x+c.w-right, originLevel:level, fallPx:0, vy:60, debris:false});
+    const offset = Math.abs(c.x - below.x);
+    if (offset <= 4){
+      this.streak++;
+      this.score += 10 + 25*Math.min(this.streak, 6); // P1: capped streak scoring
+      this.flash = SET.reducedflash ? 0 : 0.25;
+      this.popups.push({x:left+overlap/2, yOff:level, txt:'PERFECT ×'+this.streak, col:'#ffd94d', life:0.9});
+      beep(NOTE[Math.min(7,this.streak-1)], 0.11, 'sine', 0.15); vib(18);
+      if (this.streak % 5 === 0){
+        const grow = Math.min(START_W - overlap, 22);
+        this.stack.push({x:Math.max(0, left-grow/2), w:overlap+grow});
+        this.popups.push({x:W/2, yOff:level+1, txt:'WIDTH RESTORED!', col:'#5dd95d', life:1.1});
+      } else this.stack.push({x:below.x, w:below.w});
+    } else if (offset <= 14){
+      this.streak = 0; this.closes++;
+      this.score += 25;
+      this.popups.push({x:left+overlap/2, yOff:level, txt:'CLOSE +15', col:'#ff9f43', life:0.8});
+      this.stack.push({x:left, w:overlap});
+      beep(392, 0.08, 'triangle', 0.11); vib(10);
+    } else {
+      this.streak = 0; this.score += 10;
+      this.stack.push({x:left, w:overlap});
+      beep(300, 0.06, 'triangle', 0.1);
+    }
+    this.newBlock();
+  }
+  /* exposed ledges of level L: parts of block L not covered by block L+1 */
+  ledges(L){
+    const b = this.stack[L]; if (!b) return [];
+    const above = this.stack[L+1];
+    if (!above) return [{x:b.x, w:b.w}];
+    const segs = [];
+    if (above.x > b.x) segs.push({x:b.x, w:above.x-b.x});
+    if (above.x+above.w < b.x+b.w) segs.push({x:above.x+above.w, w:(b.x+b.w)-(above.x+above.w)});
+    return segs.filter(s=>s.w > 4);
+  }
+  update(dt){
+    if (this.flash>0) this.flash-=dt;
+    if (this.shake>0) this.shake-=dt*26;
+    for (const p of this.popups){ p.life-=dt; }
+    this.popups = this.popups.filter(p=>p.life>0);
+    // falling slices + knock-loose physics
+    const stillFalling = [];
+    for (const f of this.falling){
+      f.vy = Math.min(1500, f.vy + 2600*dt);
+      f.fallPx += f.vy*dt;
+      if (!f.debris) f.x += (f.x + f.w/2 < W/2 ? 14 : -14) * dt; // P1: slices tumble slightly inward
+      // slice bottom in level units: it starts sitting on top of originLevel (bottom = originLevel+? )
+      // bottom edge (level coordinate) = originLevel + 1 - fallPx/BH, where level k occupies [k, k+1)
+      const bottom = f.originLevel - f.fallPx/BH;
+      let consumed = false;
+      if (!f.debris){
+        for (let L = Math.min(f.originLevel-1, this.stack.length-1); L >= 0; L--){
+          // slice is passing level L when its bottom is within L's span
+          if (bottom < L+1 && bottom > L-0.5){
+            for (const seg of this.ledges(L)){
+              const ov = Math.min(f.x+f.w, seg.x+seg.w) - Math.max(f.x, seg.x);
+              if (ov > 18){
+                // KNOCK LOOSE level L (solid hit)
+                const struck = this.stack.splice(L,1)[0];
+                this.knocked++;
+                this.shake = SET.reducedflash ? 0 : 7;
+                this.popups.push({x:struck.x+struck.w/2, yOff:L+1, txt:'KNOCKED LOOSE!', col:'#ff5252', life:1.1});
+                beep(160, 0.16, 'sawtooth', 0.14); vib(45);
+                stillFalling.push({x:struck.x, w:struck.w, originLevel:L, fallPx:0, vy:f.vy*0.6, debris:true});
+                consumed = true;
+                break;
+              } else if (ov > 5){
+                // P1: CHIP — grazing hit narrows the block instead of knocking it out
+                const b = this.stack[L];
+                if (f.x + f.w/2 < b.x + b.w/2){ b.x += ov; b.w -= ov; } else { b.w -= ov; }
+                this.chipped++;
+                this.popups.push({x:f.x+f.w/2, yOff:L+1, txt:'CHIPPED!', col:'#ff9f43', life:0.8});
+                beep(500, 0.05, 'triangle', 0.08);
+                if (b.w < 30){ // chipped to rubble: it crumbles out
+                  const struck = this.stack.splice(L,1)[0];
+                  this.knocked++;
+                  stillFalling.push({x:struck.x, w:Math.max(10,struck.w), originLevel:L, fallPx:0, vy:f.vy*0.6, debris:true});
+                }
+                consumed = true;
+                break;
+              }
+            }
+          }
+          if (consumed) break;
+        }
+      }
+      if (!consumed && bottom > -6) stillFalling.push(f);
+    }
+    this.falling = stillFalling;
+    if (this.state!=='play') return;
+    this.cur.x += this.cur.dir * this.speed() * dt;
+    if (this.cur.x < -this.cur.w+8){ this.cur.x = -this.cur.w+8; this.cur.dir = 1; }
+    if (this.cur.x > W-8){ this.cur.x = W-8; this.cur.dir = -1; }
+    const target = Math.max(0, (this.stack.length-9)*BH);
+    this.camY += (target-this.camY)*Math.min(1, dt*4);
+  }
+  gameOver(){
+    this.state='dead';
+    setBest(this.mode, this.score);
+    if (this.mode==='daily') recordDaily(this.floor());
+    beep(130, 0.3, 'sawtooth', 0.15); vib(80);
+    document.getElementById('shareBtn').disabled = false;
+  }
+  blockY(i){ return BASE_Y - (i+1)*BH + this.camY; }
+  draw(g){
+    const hueShift = this.floor()*4;
+    const grd = g.createLinearGradient(0,0,0,H);
+    grd.addColorStop(0, 'hsl('+((200+hueShift)%360)+',45%,16%)');
+    grd.addColorStop(1, 'hsl('+((200+hueShift)%360)+',55%,7%)');
+    g.fillStyle = grd; g.fillRect(0,0,W,H);
+    const shx = this.shake>0 ? (Math.random()-0.5)*this.shake : 0;
+    g.save(); g.translate(shx, 0);
+    g.textAlign='center'; g.fillStyle='rgba(255,255,255,0.10)'; g.font='800 92px system-ui';
+    g.fillText(this.floor(), W/2, 190); g.textAlign='left';
+    for (let i=0;i<this.stack.length;i++){
+      const b=this.stack[i], y=this.blockY(i);
+      if (y<-40||y>H+40) continue;
+      g.fillStyle = (i===this.stack.length-1 && this.flash>0) ? '#ffffff' : blockColor(i);
+      g.fillRect(b.x, y, b.w, BH-3);
+      g.fillStyle='rgba(255,255,255,0.25)'; g.fillRect(b.x, y, b.w, 4);
+      if (SET.colorblind && (i+1)%5===0){ g.fillStyle='rgba(0,0,0,0.6)'; g.font='700 12px system-ui'; g.textAlign='center'; g.fillText(i+1, b.x+b.w/2, y+19); g.textAlign='left'; }
+    }
+    for (const f of this.falling){
+      const y = this.blockY(f.originLevel) + f.fallPx;
+      g.fillStyle = f.debris ? 'rgba(200,80,80,0.8)' : 'rgba(180,180,180,0.75)';
+      if (y < H+40) g.fillRect(f.x, y, f.w, BH-3);
+    }
+    if (this.state==='play' || this.state==='ready'){
+      const y = this.blockY(this.stack.length);
+      g.fillStyle='#fff'; g.fillRect(this.cur.x, y, this.cur.w, BH-3);
+      g.fillStyle='rgba(0,0,0,0.18)'; g.fillRect(this.cur.x, y+BH-8, this.cur.w, 5);
+    }
+    for (const p of this.popups){
+      const y = this.blockY(p.yOff) - 8;
+      g.globalAlpha = Math.min(1, p.life*1.5); g.fillStyle = p.col; g.font='800 16px system-ui'; g.textAlign='center';
+      g.fillText(p.txt, p.x, y); g.globalAlpha = 1; g.textAlign='left';
+    }
+    g.restore();
+    // top bar
+    g.fillStyle='rgba(10,10,18,0.85)'; g.fillRect(0,0,W,64);
+    g.fillStyle='#fff'; g.font='700 21px system-ui';
+    g.fillText('SCORE '+this.score, 14, 28);
+    g.font='12.5px system-ui'; g.fillStyle='#9a9ab0';
+    if (this.mode==='daily') g.fillText('DAILY TOWER · '+todayStr()+'  ·  BEST '+getBest('daily')+'  ·  🔥 STREAK '+dailyStreak()+'d', 14, 50);
+    else g.fillText('ENDLESS  ·  BEST '+getBest('endless')+'  ·  FLOOR '+this.floor(), 14, 50);
+    if (this.streak>0){ g.fillStyle='#ffd94d'; g.font='800 20px system-ui'; g.textAlign='center'; g.fillText('PERFECT ×'+this.streak, W/2, 94); g.textAlign='left'; }
+    if (this.knocked>0 && this.state==='play'){ g.fillStyle='#ff8a8a'; g.font='12.5px system-ui'; g.textAlign='right'; g.fillText('knocked loose: '+this.knocked, W-12, 94); g.textAlign='left'; }
+    if (this.state==='ready'){
+      g.fillStyle='rgba(5,5,12,0.45)'; g.fillRect(0,0,W,H);
+      g.textAlign='center'; g.fillStyle='#fff'; g.font='800 31px system-ui';
+      g.fillText(this.mode==='daily' ? 'DAILY TOWER' : 'SPLICE STACK', W/2, H/2-10);
+      g.fillStyle='#c9c9da'; g.font='15px system-ui';
+      g.fillText(this.mode==='daily' ? 'Same tower pattern for everyone today' : 'Tap to drop · overhang gets sliced', W/2, H/2+24);
+      g.fillStyle='#ffd94d'; g.font='700 16px system-ui'; g.fillText('TAP TO START', W/2, H/2+58); g.textAlign='left';
+    }
+    if (this.state==='paused'){
+      g.fillStyle='rgba(5,5,12,0.6)'; g.fillRect(0,0,W,H);
+      g.textAlign='center'; g.fillStyle='#fff'; g.font='800 34px system-ui'; g.fillText('PAUSED', W/2, H/2);
+      g.fillStyle='#c9c9da'; g.font='15px system-ui'; g.fillText('Tap to resume', W/2, H/2+30); g.textAlign='left';
+    }
+    if (this.state==='dead'){
+      g.fillStyle='rgba(5,5,12,0.62)'; g.fillRect(0,0,W,H);
+      g.textAlign='center'; g.fillStyle='#fff'; g.font='800 38px system-ui'; g.fillText('TOWER DOWN', W/2, H/2-30);
+      g.fillStyle='#ffd94d'; g.font='600 18px system-ui';
+      g.fillText('Floor '+this.floor()+'  ·  Score '+this.score+'  ·  Best '+getBest(this.mode), W/2, H/2+8);
+      g.fillStyle='#c9c9da'; g.font='14px system-ui';
+      g.fillText('Closes: '+this.closes+' · Chipped: '+this.chipped+' · Knocked loose: '+this.knocked, W/2, H/2+34);
+      g.fillText('TAP TO PLAY AGAIN · or Share Card below', W/2, H/2+62); g.textAlign='left';
+    }
+  }
+}
+
+/* ---------- share card ---------- */
+function shareCard(){
+  if (!game || game.state!=='dead') return;
+  const c = document.createElement('canvas'); c.width = 600; c.height = 760;
+  const g = c.getContext('2d');
+  g.fillStyle = '#101018'; g.fillRect(0,0,600,760);
+  g.fillStyle = '#c8102e'; g.fillRect(0,0,600,10);
+  g.textAlign='center'; g.fillStyle='#fff'; g.font='800 44px system-ui';
+  g.fillText('SPLICE STACK', 300, 84);
+  g.font='600 20px system-ui'; g.fillStyle='#9a9ab0';
+  g.fillText(game.mode==='daily' ? 'DAILY TOWER · '+todayStr() : 'ENDLESS', 300, 118);
+  // mini tower snapshot (last 14 blocks)
+  const blocks = game.stack.slice(-14), bw = 300;
+  blocks.forEach((b,i)=>{
+    const sx = 150 + (b.x/W)*bw, sw = (b.w/W)*bw;
+    g.fillStyle = blockColor(game.stack.length - blocks.length + i);
+    g.fillRect(sx, 560 - i*26, sw, 22);
+  });
+  g.fillStyle='#ffd94d'; g.font='800 64px system-ui';
+  g.fillText('FLOOR '+game.floor(), 300, 652);
+  g.fillStyle='#fff'; g.font='600 26px system-ui';
+  g.fillText('Score '+game.score+'  ·  Best '+getBest(game.mode), 300, 692);
+  g.fillStyle='#9a9ab0'; g.font='16px system-ui';
+  g.fillText(game.mode==='daily' ? 'Daily streak: '+dailyStreak()+' days' : 'Can you stack higher?', 300, 724);
+  const finish = blob => {
+    const file = new File([blob], 'splice-stack.png', {type:'image/png'});
+    if (navigator.canShare && navigator.canShare({files:[file]})){
+      navigator.share({files:[file], title:'Splice Stack', text:'Floor '+game.floor()+' on Splice Stack!'}).catch(()=>{});
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'splice-stack-card.png'; a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+    }
+  };
+  if (c.toBlob) c.toBlob(finish, 'image/png'); else finish(null);
+}
+
+/* ---------- wiring ---------- */
+let game = new SpliceMVP('endless');
+window.__splice = game;
+function setMode(m){
+  mode = m;
+  document.getElementById('tab-endless').classList.toggle('active', m==='endless');
+  document.getElementById('tab-daily').classList.toggle('active', m==='daily');
+  game = new SpliceMVP(m); window.__splice = game;
+  document.getElementById('shareBtn').disabled = true;
+}
+function fitCanvas(){
+  const scale = Math.min(window.innerWidth-16, 420)/W;
+  cv.style.width = (W*scale)+'px'; cv.style.height = (H*scale)+'px';
+}
+window.addEventListener('resize', fitCanvas); fitCanvas();
+function canvasPos(e){ const r = cv.getBoundingClientRect(); return { x:(e.clientX-r.left)*W/r.width, y:(e.clientY-r.top)*H/r.height }; }
+cv.addEventListener('pointerdown', e => { e.preventDefault(); game.onTap(); });
+window.addEventListener('keydown', e => { if (e.code==='Space'){ e.preventDefault(); game.onTap(); }});
+document.addEventListener('visibilitychange', () => { if (document.hidden && game.state==='play') game.state='paused'; });
+let lastT = 0;
+function loop(t){
+  const dt = Math.min(0.033, (t-lastT)/1000 || 0.016); lastT = t;
+  ctx.clearRect(0,0,W,H);
+  game.update(dt); game.draw(ctx);
+  requestAnimationFrame(loop);
+}
+bindSettings();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
