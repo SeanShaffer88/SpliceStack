@@ -63,6 +63,16 @@ jobs:
           cp ~/.config/godot/editor_settings-4.tres ~/.config/godot/editor_settings-4.3.tres
           cat ~/.config/godot/editor_settings-4.3.tres
 
+      - name: Install Android SDK platform 34 + build-tools 34
+        run: |
+          SDK_PATH="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/lib/android-sdk}}"
+          SDKMANAGER="$(find "$SDK_PATH/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort | tail -1)"
+          echo "sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --sdk_root="$SDK_PATH" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" --sdk_root="$SDK_PATH" "platforms;android-34" "build-tools;34.0.0"
+          ls "$SDK_PATH/platforms"
+          ls "$SDK_PATH/build-tools"
+
       - name: Verify Godot headless logic harness
         run: godot --headless --path . -s tests/test_mvp.gd
 
