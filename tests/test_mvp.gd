@@ -5,6 +5,7 @@ extends SceneTree
 var main: Node
 var frame := 0
 var phase := 0
+var ready_x := -1.0
 
 func _initialize() -> void:
 	var ps: PackedScene = load("res://Main.tscn")
@@ -13,6 +14,13 @@ func _initialize() -> void:
 
 func _process(_delta: float) -> bool:
 	frame += 1
+	if frame == 2:
+		ready_x = float(main.cur["x"])
+		var cx := float(main.cur["x"])
+		var cw := float(main.cur["w"])
+		print("TEST spawn-visible ok=", cx >= 0.0 and cx + cw <= 720.0, " x=", cx, " w=", cw)
+	if frame == 4:
+		print("TEST ready-motion ok=", absf(float(main.cur["x"]) - ready_x) > 0.5, " dx=", float(main.cur["x"]) - ready_x, " state=", main.state)
 	if frame == 5:
 		main.cmd_tap(Vector2.ZERO) # ready -> play
 	if phase == 0 and frame > 5 and frame % 6 == 0 and main.state == "play":
