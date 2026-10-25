@@ -41,6 +41,7 @@ func _today() -> String:
 	return "%04d-%02d-%02d" % [int(t["year"]), int(t["month"]), int(t["day"])]
 
 func _ready() -> void:
+	DisplayServer.screen_set_orientation(DisplayServer.SCREEN_PORTRAIT)
 	rng.randomize()
 	best = _load_best(mode)
 	_reset()
