@@ -15,6 +15,8 @@ func _initialize() -> void:
 func _process(_delta: float) -> bool:
 	frame += 1
 	if frame == 2:
+		var mr: Rect2 = main.msg_label.get_rect()
+		print("TEST msg-rect ok=", mr.position.x >= 0.0 and mr.position.y >= 0.0 and mr.end.x <= 720.0 and mr.end.y <= 1280.0 and absf(mr.get_center().x - 360.0) < 4.0 and absf(mr.get_center().y - 640.0) < 4.0, " rect=", mr)
 		ready_x = float(main.cur["x"])
 		var cx := float(main.cur["x"])
 		var cw := float(main.cur["w"])
