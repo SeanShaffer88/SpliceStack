@@ -14,6 +14,25 @@ func _initialize() -> void:
 
 func _process(_delta: float) -> bool:
 	frame += 1
+	if frame == 3:
+		# Android double-input regression: one physical tap delivers a touch
+		# event AND an emulated mouse event in the same frame. On a fresh
+		# (ready) instance that must cause exactly ONE action (start), never
+		# start + an instant edge drop.
+		var ps2: PackedScene = load("res://Main.tscn")
+		var probe: Node = ps2.instantiate()
+		root.add_child(probe)
+		var te := InputEventScreenTouch.new()
+		te.pressed = true
+		te.position = Vector2(360, 640)
+		var me := InputEventMouseButton.new()
+		me.pressed = true
+		me.button_index = MOUSE_BUTTON_LEFT
+		me.position = Vector2(360, 640)
+		probe._input(te)
+		probe._input(me)
+		print("TEST single-tap-single-action ok=", probe.state == "play" and probe.stack.size() == 1, " state=", probe.state, " stack=", probe.stack.size())
+		probe.queue_free()
 	if frame == 2:
 		var mr: Rect2 = main.msg_label.get_rect()
 		print("TEST msg-rect ok=", mr.position.x >= 0.0 and mr.position.y >= 0.0 and mr.end.x <= 720.0 and mr.end.y <= 1280.0 and absf(mr.get_center().x - 360.0) < 4.0 and absf(mr.get_center().y - 640.0) < 4.0, " rect=", mr)
