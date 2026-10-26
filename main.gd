@@ -26,6 +26,8 @@ var chipped := 0
 var cur := {"x": 0.0, "w": START_W, "dir": 1.0}
 var cur_jitter := 1.0
 var falling: Array = [] # {x,w,origin_level:int,fall_px:float,vy:float,debris:bool}
+var popups: Array = [] # {node:Label, t:float}
+var _tap_frame := -1
 var cam_y := 0.0
 var rng := RandomNumberGenerator.new()
 var daily_rng := RandomNumberGenerator.new()
@@ -115,9 +117,64 @@ func _input(event: InputEvent) -> void:
 			cmd_set_mode("daily")
 			return
 	if event is InputEventScreenTouch and event.pressed:
-		cmd_tap(event.position)
+		_handle_tap(event.position)
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		cmd_tap(event.position)
+		_handle_tap(event.position)
+
+func _handle_tap(pos: Vector2) -> void:
+	# ONE physical tap must cause ONE action. With touch->mouse emulation a
+	# single tap delivers BOTH a touch and a mouse event in the same frame,
+	# which made every tap start-and-instantly-drop on Android: blocks were
+	# cut at the spawn edge and games ended in 1-2 stacks. Emulation is now
+	# off in project.godot; this same-frame guard makes it impossible anyway.
+	var f := Engine.get_process_frames()
+	if f == _tap_frame:
+		return
+	_tap_frame = f
+	cmd_tap(pos)
+
+func _popup(text: String, cx: float, cy: float, col: Color) -> void:
+	var l := Label.new()
+	l.text = text
+	l.size = Vector2(300.0, 44.0)
+	l.position = Vector2(cx - 150.0, cy - 58.0)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", 36)
+	l.add_theme_color_override("font_color", col)
+	add_child(l)
+	popups.append({"node": l, "t": 0.0})
+
+func _update_popups(delta: float) -> void:
+	var keep: Array = []
+	for p in popups:
+		p["t"] = float(p["t"]) + delta
+		var l: Label = p["node"]
+		l.position.y -= 46.0 * delta
+		l.modulate.a = clampf(1.0 - float(p["t"]) / 0.9, 0.0, 1.0)
+		if float(p["t"]) < 0.9:
+			keep.append(p)
+		else:
+			l.queue_free()
+	popups = keep
+
+func _beep(freq: float, dur: float) -> void:
+	var sr := 22050
+	var n := int(sr * dur)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	for i in range(n):
+		var env := 1.0 - float(i) / float(n)
+		var v := int(sin(TAU * freq * float(i) / float(sr)) * env * 0.25 * 32767.0)
+		data.encode_s16(i * 2, v)
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = sr
+	stream.data = data
+	var player := AudioStreamPlayer.new()
+	add_child(player)
+	player.stream = stream
+	player.play()
+	player.finished.connect(player.queue_free)
 
 func _drop() -> void:
 	var below: Dictionary = stack[stack.size() - 1]
@@ -136,9 +193,15 @@ func _drop() -> void:
 	if cx + cw > right:
 		falling.append({"x": right, "w": cx + cw - right, "origin_level": level, "fall_px": 0.0, "vy": 100.0, "debris": false})
 	var offset := absf(cx - float(below["x"]))
+	var pop_text := "+10"
+	var pop_col := Color(1, 1, 1, 0.9)
+	var freq := 470.0
 	if offset <= PERFECT_PX:
 		streak += 1
 		score += 10 + 25 * mini(streak, 6) # P1: capped streak scoring
+		pop_text = "PERFECT" if streak == 1 else "PERFECT ×%d" % streak
+		pop_col = Color(1.0, 0.84, 0.25)
+		freq = 700.0 + 80.0 * float(mini(streak, 6))
 		if streak % 5 == 0:
 			var grow := minf(START_W - overlap, 38.0)
 			stack.append({"x": maxf(0.0, left - grow / 2.0), "w": overlap + grow})
@@ -148,11 +211,17 @@ func _drop() -> void:
 		streak = 0
 		closes += 1
 		score += 25
+		pop_text = "CLOSE +25"
+		pop_col = Color(0.55, 0.9, 1.0)
+		freq = 620.0
 		stack.append({"x": left, "w": overlap})
 	else:
 		streak = 0
 		score += 10
 		stack.append({"x": left, "w": overlap})
+	var placed: Dictionary = stack[stack.size() - 1]
+	_popup(pop_text, float(placed["x"]) + float(placed["w"]) / 2.0, _block_top_y(level), pop_col)
+	_beep(freq, 0.07)
 	_new_block()
 	_update_labels()
 
@@ -223,6 +292,7 @@ func _update_falling(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_update_falling(delta)
+	_update_popups(delta)
 	if state != "dead":
 		cur["x"] = float(cur["x"]) + float(cur["dir"]) * _speed() * delta
 		if float(cur["x"]) < 0.0:
@@ -243,6 +313,7 @@ func _game_over() -> void:
 	if mode == "daily":
 		_record_daily(_floor())
 	Input.vibrate_handheld(80)
+	_beep(150.0, 0.28)
 	msg_label.text = "TOWER DOWN\nFloor %d · Score %d · Best %d\nChipped: %d · Knocked loose: %d\nTap to retry" % [_floor(), score, best, chipped, knocked]
 	_update_labels()
 
